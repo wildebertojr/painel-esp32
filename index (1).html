@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 IoT Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .pulse-live { animation: pulse-green 2s infinite; }
+        @keyframes pulse-green {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-cyan-500 selection:text-white">
+
+    <header class="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
+                    <i class="fa-solid fa-microchip text-xl"></i>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="font-bold text-lg leading-tight tracking-wide bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent truncate">ESP32 IoT Monitor</h1>
+                    <p class="text-xs text-slate-400 truncate">Estação de Sensores em Tempo Real</p>
+                </div>
+            </div>
+
+            <div id="connectionStatus" class="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                <span id="connectionDot" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                <span id="connectionText">Conectando...</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl">
+                        <i class="fa-solid fa-rotate text-lg"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-400 font-medium">Atualização automática</p>
+                        <p id="timerLabel" class="text-sm font-semibold text-slate-200">Atualizando a cada 20s</p>
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="toggleAuto" class="sr-only peer" checked>
+                    <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                </label>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-around gap-2 shadow-lg">
+                <button onclick="buscarDados()" class="flex flex-1 items-center justify-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition border border-slate-700">
+                    <i class="fa-solid fa-arrows-rotate text-cyan-400"></i>
+                    <span>Atualizar agora</span>
+                </button>
+                <button onclick="openModal('jsonPostModal')" class="flex flex-1 items-center justify-center gap-2 px-3 py-2 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 text-xs font-semibold rounded-xl transition border border-cyan-500/30">
+                    <i class="fa-solid fa-flask"></i>
+                    <span>Testar valores</span>
+                </button>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-purple-500/10 text-purple-400 rounded-xl">
+                        <i class="fa-solid fa-clock text-lg"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-400 font-medium">Última leitura recebida</p>
+                        <p id="lastUpdateText" class="text-sm font-semibold text-slate-200">--</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg transition-all duration-300 hover:border-slate-700">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Temperatura</span>
+                    </div>
+                    <div id="iconBgTemp" class="p-3 rounded-xl bg-orange-500/10 text-orange-400">
+                        <i class="fa-solid fa-temperature-half text-xl"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="valTemp" class="text-3xl font-extrabold text-slate-100">--</span>
+                    <span class="text-lg font-medium text-slate-400">°C</span>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <span class="text-slate-400">Status:</span>
+                    <span id="statusTemp" class="font-semibold text-slate-400">Aguardando</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg transition-all duration-300 hover:border-slate-700">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Umidade do ar</span>
+                    </div>
+                    <div class="p-3 rounded-xl bg-blue-500/10 text-blue-400">
+                        <i class="fa-solid fa-droplet text-xl"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="valUmid" class="text-3xl font-extrabold text-slate-100">--</span>
+                    <span class="text-lg font-medium text-slate-400">%</span>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80">
+                    <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div id="barUmid" class="bg-blue-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg transition-all duration-300 hover:border-slate-700">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Pressão atm.</span>
+                    </div>
+                    <div class="p-3 rounded-xl bg-purple-500/10 text-purple-400">
+                        <i class="fa-solid fa-gauge-high text-xl"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="valPressao" class="text-3xl font-extrabold text-slate-100">--</span>
+                    <span class="text-lg font-medium text-slate-400">hPa</span>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <span class="text-slate-400">Nível do mar:</span>
+                    <span class="font-semibold text-slate-300">~ 1013 hPa</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg transition-all duration-300 hover:border-slate-700">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Luminosidade</span>
+                    </div>
+                    <div id="iconBgLuz" class="p-3 rounded-xl bg-yellow-500/10 text-yellow-400">
+                        <i class="fa-solid fa-sun text-xl"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="valLuz" class="text-3xl font-extrabold text-slate-100">--</span>
+                    <span class="text-lg font-medium text-slate-400">/ 1000</span>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <span class="text-slate-400">Ambiente:</span>
+                    <span id="statusLuz" class="font-semibold text-slate-400">Aguardando</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg transition-all duration-300 hover:border-slate-700">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Qualidade do ar</span>
+                    </div>
+                    <div id="iconBgGas" class="p-3 rounded-xl bg-teal-500/10 text-teal-400">
+                        <i class="fa-solid fa-wind text-xl"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="valGas" class="text-3xl font-extrabold text-slate-100">--</span>
+                    <span class="text-lg font-medium text-slate-400">/ 100</span>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <span class="text-slate-400">Gases:</span>
+                    <span id="statusGas" class="font-semibold text-slate-400">Aguardando</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg transition-all duration-300 hover:border-slate-700">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Chuva (pluviômetro)</span>
+                    </div>
+                    <div id="iconBgChuva" class="p-3 rounded-xl bg-sky-500/10 text-sky-400">
+                        <i class="fa-solid fa-cloud-rain text-xl"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="valChuva" class="text-3xl font-extrabold text-slate-100">--</span>
+                    <span class="text-lg font-medium text-slate-400">mm</span>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <span id="statusChuva" class="font-semibold text-slate-400">Aguardando</span>
+                    <span id="valIntens" class="text-slate-400">-- mm/h</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <div>
+                        <h2 class="font-bold text-base text-slate-100 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line text-cyan-400"></i>
+                            Histórico das últimas leituras
+                        </h2>
+                        <p class="text-xs text-slate-400">Temperatura (°C) e umidade (%)</p>
+                    </div>
+                    <span class="text-xs px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-lg text-slate-300">Últimas 12 leituras</span>
+                </div>
+                <div class="w-full h-64 sm:h-72">
+                    <canvas id="sensorChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="font-bold text-base text-slate-100 flex items-center gap-2">
+                        <i class="fa-solid fa-code text-emerald-400"></i>
+                        JSON recebido
+                    </h2>
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                </div>
+                <p class="text-xs text-slate-400 mb-3">Última leitura recebida do ThingSpeak:</p>
+                <div class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs overflow-x-auto text-cyan-300">
+                    <pre id="jsonPreview">Aguardando dados da ESP32...</pre>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+                    <span>Formato: JSON</span>
+                    <button onclick="copyJsonPayload()" class="hover:text-cyan-400 flex items-center gap-1">
+                        <i class="fa-regular fa-copy"></i> Copiar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="jsonPostModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+            <button onclick="closeModal('jsonPostModal')" class="absolute top-4 right-4 text-slate-400 hover:text-white">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+            <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2 mb-2">
+                <i class="fa-solid fa-flask text-cyan-400"></i>
+                Testar valores no painel
+            </h3>
+            <p class="text-xs text-slate-400 mb-4">Preenche o painel com valores digitados por você, só para testar o visual. Não altera a ESP32.</p>
+            <form onsubmit="handleManualPost(event)" class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Temperatura (°C)</label>
+                        <input type="number" step="0.1" id="inputTemp" value="31.2" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Umidade (%)</label>
+                        <input type="number" step="0.1" id="inputUmid" value="42.0" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Pressão (hPa)</label>
+                        <input type="number" id="inputPressao" value="1008" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Luz (0 a 1000)</label>
+                        <input type="number" id="inputLuz" value="210" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500">
+                    </div>
+                </div>
+                <div class="pt-2 flex justify-end gap-3">
+                    <button type="button" onclick="closeModal('jsonPostModal')" class="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold bg-cyan-500 text-white hover:bg-cyan-400">Aplicar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const maxDataPoints = 12;
+        const historyData = { labels: [], temp: [], umid: [] };
+        let autoInterval = null;
+        let chartInstance = null;
+
+        function initChart() {
+            const ctx = document.getElementById('sensorChart').getContext('2d');
+            const tempGradient = ctx.createLinearGradient(0, 0, 0, 300);
+            tempGradient.addColorStop(0, 'rgba(249, 115, 22, 0.4)');
+            tempGradient.addColorStop(1, 'rgba(249, 115, 22, 0.0)');
+            const umidGradient = ctx.createLinearGradient(0, 0, 0, 300);
+            umidGradient.addColorStop(0, 'rgba(59, 130, 246, 0.4)');
+            umidGradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: historyData.labels,
+                    datasets: [
+                        { label: 'Temperatura (°C)', data: historyData.temp, borderColor: '#f97316', backgroundColor: tempGradient, borderWidth: 2, fill: true, tension: 0.4, pointRadius: 4, pointHoverRadius: 6 },
+                        { label: 'Umidade (%)', data: historyData.umid, borderColor: '#3b82f6', backgroundColor: umidGradient, borderWidth: 2, fill: true, tension: 0.4, pointRadius: 4, pointHoverRadius: 6 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#94a3b8', font: { family: 'Inter', size: 12 } } } },
+                    scales: {
+                        x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } } },
+                        y: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } } }
+                    }
+                }
+            });
+        }
+
+        function updateDashboard(data) {
+            const temp = parseFloat(data.temperatura);
+            const umid = parseFloat(data.umidade);
+            const pressao = parseInt(data.pressao);
+            const luz = parseInt(data.luz);
+            const gas = parseFloat(data.gas);
+            const chuva = parseFloat(data.chuva);
+            const intens = parseFloat(data.intensidade);
+            const timeStr = data.timestamp || new Date().toLocaleTimeString('pt-BR');
+
+            document.getElementById('valTemp').innerText = isNaN(temp) ? '--' : temp.toFixed(1);
+            document.getElementById('valUmid').innerText = isNaN(umid) ? '--' : umid.toFixed(1);
+            document.getElementById('valPressao').innerText = isNaN(pressao) ? '--' : pressao;
+            document.getElementById('valLuz').innerText = isNaN(luz) ? '--' : luz;
+
+            const valGas = document.getElementById('valGas');
+            const statusGas = document.getElementById('statusGas');
+            const iconBgGas = document.getElementById('iconBgGas');
+            if (isNaN(gas)) {
+                valGas.innerText = '--';
+                statusGas.innerText = 'Aguardando';
+                statusGas.className = "font-semibold text-slate-400";
+                iconBgGas.className = "p-3 rounded-xl bg-teal-500/10 text-teal-400";
+            } else {
+                valGas.innerText = Math.round(gas);
+                if (gas < 25) {
+                    statusGas.innerText = "Baixo";
+                    statusGas.className = "font-semibold text-emerald-400";
+                    iconBgGas.className = "p-3 rounded-xl bg-emerald-500/10 text-emerald-400";
+                } else if (gas < 50) {
+                    statusGas.innerText = "Moderado";
+                    statusGas.className = "font-semibold text-amber-400";
+                    iconBgGas.className = "p-3 rounded-xl bg-amber-500/10 text-amber-400";
+                } else {
+                    statusGas.innerText = "Alto";
+                    statusGas.className = "font-semibold text-red-400";
+                    iconBgGas.className = "p-3 rounded-xl bg-red-500/10 text-red-400";
+                }
+            }
+            document.getElementById('barUmid').style.width = isNaN(umid) ? '0%' : `${Math.min(Math.max(umid, 0), 100)}%`;
+
+            const cardTempIcon = document.getElementById('iconBgTemp');
+            const statusTemp = document.getElementById('statusTemp');
+            if (temp > 28) {
+                statusTemp.innerText = "Quente";
+                statusTemp.className = "font-semibold text-red-400";
+                cardTempIcon.className = "p-3 rounded-xl bg-red-500/10 text-red-400";
+            } else if (temp < 18) {
+                statusTemp.innerText = "Frio";
+                statusTemp.className = "font-semibold text-cyan-400";
+                cardTempIcon.className = "p-3 rounded-xl bg-cyan-500/10 text-cyan-400";
+            } else {
+                statusTemp.innerText = "Agradável";
+                statusTemp.className = "font-semibold text-emerald-400";
+                cardTempIcon.className = "p-3 rounded-xl bg-orange-500/10 text-orange-400";
+            }
+
+            const statusLuz = document.getElementById('statusLuz');
+            const iconBgLuz = document.getElementById('iconBgLuz');
+            if (luz < 300) {
+                statusLuz.innerText = "Escuro / Noite";
+                statusLuz.className = "font-semibold text-indigo-400";
+                iconBgLuz.className = "p-3 rounded-xl bg-indigo-500/10 text-indigo-400";
+            } else if (luz < 700) {
+                statusLuz.innerText = "Nublado / Sombra";
+                statusLuz.className = "font-semibold text-amber-400";
+                iconBgLuz.className = "p-3 rounded-xl bg-amber-500/10 text-amber-400";
+            } else {
+                statusLuz.innerText = "Ensolarado / Claro";
+                statusLuz.className = "font-semibold text-yellow-400";
+                iconBgLuz.className = "p-3 rounded-xl bg-yellow-500/10 text-yellow-400";
+            }
+
+            const valChuva = document.getElementById('valChuva');
+            const statusChuva = document.getElementById('statusChuva');
+            const valIntens = document.getElementById('valIntens');
+            const iconBgChuva = document.getElementById('iconBgChuva');
+            if (isNaN(chuva)) {
+                valChuva.innerText = '--';
+                valIntens.innerText = '-- mm/h';
+                statusChuva.innerText = 'Aguardando';
+                statusChuva.className = "font-semibold text-slate-400";
+                iconBgChuva.className = "p-3 rounded-xl bg-sky-500/10 text-sky-400";
+            } else {
+                valChuva.innerText = chuva.toFixed(2);
+                const r = isNaN(intens) ? 0 : intens;
+                valIntens.innerText = r.toFixed(1) + ' mm/h';
+                if (r < 0.1) {
+                    statusChuva.innerText = "Sem chuva";
+                    statusChuva.className = "font-semibold text-slate-300";
+                    iconBgChuva.className = "p-3 rounded-xl bg-sky-500/10 text-sky-400";
+                } else if (r < 2.5) {
+                    statusChuva.innerText = "Chuva fraca";
+                    statusChuva.className = "font-semibold text-sky-400";
+                    iconBgChuva.className = "p-3 rounded-xl bg-sky-500/10 text-sky-400";
+                } else if (r < 10) {
+                    statusChuva.innerText = "Chuva moderada";
+                    statusChuva.className = "font-semibold text-blue-400";
+                    iconBgChuva.className = "p-3 rounded-xl bg-blue-500/10 text-blue-400";
+                } else if (r < 50) {
+                    statusChuva.innerText = "Chuva forte";
+                    statusChuva.className = "font-semibold text-amber-400";
+                    iconBgChuva.className = "p-3 rounded-xl bg-amber-500/10 text-amber-400";
+                } else {
+                    statusChuva.innerText = "Chuva muito forte";
+                    statusChuva.className = "font-semibold text-red-400";
+                    iconBgChuva.className = "p-3 rounded-xl bg-red-500/10 text-red-400";
+                }
+            }
+
+            const fullPayload = { temperatura: temp, umidade: umid, pressao: pressao, luz: luz, gas: isNaN(gas) ? null : gas, chuva: isNaN(chuva) ? null : chuva, intensidade: isNaN(intens) ? null : intens, timestamp: timeStr };
+            document.getElementById('jsonPreview').innerText = JSON.stringify(fullPayload, null, 2);
+            document.getElementById('lastUpdateText').innerText = timeStr;
+
+            historyData.labels.push(timeStr);
+            historyData.temp.push(temp);
+            historyData.umid.push(umid);
+            if (historyData.labels.length > maxDataPoints) {
+                historyData.labels.shift();
+                historyData.temp.shift();
+                historyData.umid.shift();
+            }
+            chartInstance.update();
+        }
+
+        function setStatus(online, idadeSeg) {
+            const box = document.getElementById('connectionStatus');
+            const dot = document.getElementById('connectionDot');
+            const txt = document.getElementById('connectionText');
+            if (online) {
+                box.className = "shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 pulse-live";
+                txt.innerText = "ESP32 online";
+            } else {
+                box.className = "shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20";
+                dot.className = "w-2.5 h-2.5 rounded-full bg-red-500";
+                txt.innerText = (idadeSeg !== undefined)
+                    ? "ESP32 offline (há " + Math.max(1, Math.round(idadeSeg / 60)) + " min)"
+                    : "Sem conexão";
+            }
+        }
+
+        // ====== CONFIGURE AQUI ======
+        const CHANNEL_ID = "3574997";   // ThingSpeak -> seu canal -> Channel ID
+        const INTERVALO_MS = 20000;            // o plano grátis do ThingSpeak atualiza a cada ~15 s
+        // ============================
+
+        let ultimoEntryId = null;
+
+        // Lê a última leitura do canal no ThingSpeak
+        async function buscarDados() {
+            try {
+                const url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds/last.json`;
+                const resp = await fetch(url, { cache: 'no-store' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const f = await resp.json();
+                if (!f || !f.created_at) throw new Error('canal sem dados');
+
+                const quando = new Date(f.created_at);
+                const idadeSeg = (Date.now() - quando.getTime()) / 1000;
+                setStatus(idadeSeg < 120, idadeSeg);
+
+                // só atualiza se chegou uma leitura nova (evita repetir pontos no gráfico)
+                if (f.entry_id !== ultimoEntryId) {
+                    ultimoEntryId = f.entry_id;
+                    updateDashboard({
+                        temperatura: f.field1,
+                        umidade: f.field2,
+                        pressao: f.field3,
+                        luz: f.field4,
+                        gas: f.field5,
+                        chuva: f.field6,
+                        intensidade: f.field7,
+                        timestamp: quando.toLocaleTimeString('pt-BR')
+                    });
+                }
+            } catch (erro) {
+                console.log('Erro ao buscar dados:', erro);
+                setStatus(false);
+            }
+        }
+
+        function handleManualPost(event) {
+            event.preventDefault();
+            updateDashboard({
+                temperatura: parseFloat(document.getElementById('inputTemp').value),
+                umidade: parseFloat(document.getElementById('inputUmid').value),
+                pressao: parseInt(document.getElementById('inputPressao').value),
+                luz: parseInt(document.getElementById('inputLuz').value),
+                timestamp: new Date().toLocaleTimeString('pt-BR')
+            });
+            closeModal('jsonPostModal');
+        }
+
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        function copyJsonPayload() {
+            const text = document.getElementById('jsonPreview').innerText;
+            navigator.clipboard.writeText(text).then(() => alert('JSON copiado!'));
+        }
+
+        function startAuto() {
+            if (!autoInterval) autoInterval = setInterval(buscarDados, INTERVALO_MS);
+        }
+        function stopAuto() {
+            if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
+        }
+
+        document.getElementById('toggleAuto').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                startAuto();
+                document.getElementById('timerLabel').innerText = "Atualizando a cada 20s";
+            } else {
+                stopAuto();
+                document.getElementById('timerLabel').innerText = "Atualização pausada";
+            }
+        });
+
+        window.onload = function () {
+            initChart();
+            buscarDados();
+            startAuto();
+        };
+    </script>
+</body>
+</html>
